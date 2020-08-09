@@ -1,0 +1,10 @@
+#!/bin/bash
+
+ROM=rom
+echo num args: $#
+echo $1
+if [ "$#" -ge 1 ];
+  then ROM=$1;
+fi
+
+cli/desmume-cli cli/roms/${ROM}.nds
