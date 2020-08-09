@@ -27,7 +27,7 @@
 
 		#include "frontend/windows/winutil.h"
 		#include "frontend/windows/resource.h"
-#elif !defined(DESMUME_COCOA)
+#elif !defined(DESMUME_COCOA) && !defined(__EMSCRIPTEN__)
 	#include <glib.h>
 #endif /* HOST_WINDOWS */
 
@@ -139,6 +139,13 @@ public:
 		std::string pathStr = Path::GetFileDirectoryPath(path);
 
 		strncpy(pathToModule, pathStr.c_str(), MAX_PATH);
+#elif defined(__EMSCRIPTEN__)
+
+		// assume our web "module" resides at root
+		std::string pathStr("/");
+
+		strncpy(pathToModule, pathStr.c_str(), MAX_PATH);
+
 #else
 		char *cwd = g_build_filename(g_get_user_config_dir(), "desmume", NULL);
 		g_mkdir_with_parents(cwd, 0755);

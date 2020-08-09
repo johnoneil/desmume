@@ -22,7 +22,18 @@
 #include <SDL_thread.h>
 #include <stdlib.h>
 #include <string.h>
+
+//#if !defined(__EMSCRIPTEN__)
+//#define USE_GLIB
+//#endif
+
+#if !defined(__EMSCRIPTEN__)
 #include <glib.h>
+#endif
+
+#if defined(__EMSCRIPTEN__)
+#include <emscripten.h>
+#endif
 
 #ifndef VERSION
 #define VERSION "Unknown version"
@@ -31,7 +42,7 @@
 /*
  * FIXME: Not sure how to detect OpenGL in a platform portable way.
  */
-#ifdef HAVE_GL_GL_H
+#if defined(HAVE_GL_GL_H) && !SDL_VERSION_ATLEAST(2,0,0)
 #define INCLUDE_OPENGL_2D
 #endif
 
@@ -54,10 +65,15 @@
 #include "../rasterize.h"
 #include "../saves.h"
 #include "../frontend/modules/osd/agg/agg_osd.h"
+#if !defined(__EMSCRIPTEN__)
 #include "../shared/desmume_config.h"
+#endif
 #include "../commandline.h"
 #include "../slot2.h"
 #include "../utils/xstring.h"
+#if defined(__EMSCRIPTEN__)
+#include "../path.h"
+#endif
 
 #ifdef GDB_STUB
 #include "../armcpu.h"
@@ -76,8 +92,14 @@ static float nds_screen_size_ratio = 1.0f;
 
 #define FPS_LIMITER_FPS 60
 
+#if !SDL_VERSION_ATLEAST(2,0,0)
 static SDL_Surface * surface;
-
+#else
+static SDL_Surface * surface = 0;
+static SDL_Window* screen = 0;
+static SDL_Renderer *renderer = 0;
+static SDL_Texture *screenTexture = 0;
+#endif
 /* Flags to pass to SDL_SetVideoMode */
 static int sdl_videoFlags;
 
@@ -87,6 +109,63 @@ SoundInterface_struct *SNDCoreList[] = {
   &SNDSDL,
   NULL
 };
+
+// expose some controls to javascript to manipulate sound volume
+// volume control
+#if defined(__EMSCRIPTEN__)
+
+extern "C" {
+
+static int sndvolume = 100;
+
+EMSCRIPTEN_KEEPALIVE
+void SetVolume(int volume)
+{
+  sndvolume = std::max(100, volume);
+  sndvolume = std::min(0, sndvolume);
+	#if 1
+	SPU_SetVolume(sndvolume);
+  #else
+  SNDSDLSetVolume(sndvolume);
+  #endif
+}
+
+EMSCRIPTEN_KEEPALIVE
+void DecreaseVolume()
+{
+  #if 1
+  printf("%s:%d:%s initial volume %d\n", __FILE__, __LINE__, __func__, sndvolume);
+  #endif
+	sndvolume = std::max(0, sndvolume - 10);
+  #if 1
+	SPU_SetVolume(sndvolume);
+  #else
+  SNDSDLSetVolume(sndvolume);
+  #endif
+  #if 1
+  printf("%s:%d:%s final volume %d\n", __FILE__, __LINE__, __func__, sndvolume);
+  #endif
+}
+
+EMSCRIPTEN_KEEPALIVE
+void IncreaseVolume()
+{
+  #if 1
+  printf("%s:%d:%s initial volume %d\n", __FILE__, __LINE__, __func__, sndvolume);
+  #endif
+	sndvolume = std::min(100, sndvolume + 10);
+	#if 1
+	SPU_SetVolume(sndvolume);
+  #else
+  SNDSDLSetVolume(sndvolume);
+  #endif
+  #if 1
+  printf("%s:%d:%s final volume %d\n", __FILE__, __LINE__, __func__, sndvolume);
+  #endif
+}
+
+}// extern "C"
+#endif
 
 GPU3DInterface *core3DList[] = {
 &gpu3DNull,
@@ -112,12 +191,12 @@ const u16 cli_kb_cfg[NB_KEYS] =
   { 
     SDLK_x,         // A
     SDLK_z,         // B
-    SDLK_RSHIFT,    // select
+    static_cast<u16>(SDLK_RSHIFT),    // select
     SDLK_RETURN,    // start
-    SDLK_RIGHT,     // Right
-    SDLK_LEFT,      // Left
-    SDLK_UP,        // Up
-    SDLK_DOWN,      // Down
+    static_cast<u16>(SDLK_RIGHT),     // Right
+    static_cast<u16>(SDLK_LEFT),      // Left
+    static_cast<u16>(SDLK_UP),        // Up
+    static_cast<u16>(SDLK_DOWN),      // Down
     SDLK_w,         // R
     SDLK_q,         // L
     SDLK_s,         // X
@@ -141,6 +220,21 @@ public:
 #endif
 
   int firmware_language;
+
+public:
+  void printConfig() const
+  {
+    printf("Configured features:\n");
+    printf("auto_pause: %d\n", auto_pause);
+    printf("frameskip: %d\n", frameskip);
+    printf("engine_3d %d\n", engine_3d);
+    printf("savetype: %d\n", savetype);
+    #if defined(INCLUDE_OPENGL_2D)
+    printf("opengl_2d: %d\n", opengl_2d);
+    #endif
+    printf("firmware_language: %d\n", firmware_language);
+  }
+
 };
 
 static void
@@ -160,10 +254,19 @@ init_config( class configured_features *config) {
   config->firmware_language = -1;
 }
 
+#if defined(__EMSCRIPTEN__)
+// Simple implementations if GLIB lacking
+void g_printerr(const char* str)
+{
+  fprintf(stderr, "%s\n", str);
+}
+#endif
+
 
 static int
 fill_config( class configured_features *config,
              int argc, char ** argv) {
+  #if !defined(__EMSCRIPTEN__)
   GOptionEntry options[] = {
     { "auto-pause", 0, 0, G_OPTION_ARG_NONE, &config->auto_pause, "Pause emulation if focus is lost", NULL},
     { "frameskip", 0, 0, G_OPTION_ARG_INT, &config->frameskip, "Set frameskip", "FRAMESKIP"},
@@ -193,6 +296,8 @@ fill_config( class configured_features *config,
     "LANG"},
     { NULL }
   };
+
+  #endif
 
   //g_option_context_add_main_entries (config->ctx, options, "options");
   config->parse(argc,argv);
@@ -236,6 +341,8 @@ fill_config( class configured_features *config,
     goto error;
   }
 #endif
+
+  config->printConfig();
 
   return 1;
 
@@ -313,9 +420,13 @@ initGL( GLuint *screen_texture) {
   if ((errCode = glGetError()) != GL_NO_ERROR) {
     const GLubyte *errString;
 
+    // currently issues linking with gluErrorString on emscripten
+    #if !defined(__EMSCRIPTEN__)
     errString = gluErrorString(errCode);
     fprintf( stderr, "Failed to init GL: %s\n", errString);
-
+    #else
+    fprintf(stderr, "Failed to init GL via errCode: %d\n", errCode);
+    #endif
     return 0;
   }
 
@@ -325,11 +436,21 @@ initGL( GLuint *screen_texture) {
 static void
 resizeWindow( u16 width, u16 height, GLuint *screen_texture) {
 
+  #if !SDL_VERSION_ATLEAST(2,0,0)
+
   int comp_width = 3 * width;
   int comp_height = 2 * height;
   GLenum errCode;
 
+  #if 1
   surface = SDL_SetVideoMode(width, height, 32, sdl_videoFlags);
+  #else
+  surface = SDL_CreateWindow("My Game Window",
+                          SDL_WINDOWPOS_UNDEFINED,
+                          SDL_WINDOWPOS_UNDEFINED,
+                          width, height,
+                          sdl_videoFlags);
+  #endif
   initGL(screen_texture);
 
 #ifdef HAVE_LIBAGG
@@ -363,9 +484,14 @@ resizeWindow( u16 width, u16 height, GLuint *screen_texture) {
   if ((errCode = glGetError()) != GL_NO_ERROR) {
     const GLubyte *errString;
 
+    #if !defined(__EMSCRIPTEN__)
     errString = gluErrorString(errCode);
     fprintf( stderr, "GL resize failed: %s\n", errString);
+    #else
+    fprintf( stderr, "GL resize failed: %d\n", errCode);
+    #endif
   }
+  #endif // !SDL_VERSION_ATLEAST(2,0,0)
 }
 
 
@@ -412,7 +538,9 @@ opengl_Draw(GLuint *texture) {
   glEnd();
 
   /* Flush the drawing to the screen */
+  #if !SDL_VERSION_ATLEAST(2,0,0)
   SDL_GL_SwapBuffers( );
+  #endif
 }
 #endif
 
@@ -427,20 +555,129 @@ resizeWindow_stub (u16 width, u16 height, void *screen_texture) {
 }
 #endif
 
+#if defined(__EMSCRIPTEN__)
+
+void PutPixel16_nolock(SDL_Surface * surface, int x, int y, Uint32 color)
+{
+    Uint8 * pixel = (Uint8*)surface->pixels;
+    pixel += (y * surface->pitch) + (x * sizeof(Uint16));
+    *((Uint16*)pixel) = color & 0xFFFF;
+}
+
+
+/*
+ as of emscripten 1.38.6 emscripten only has a partial impl of SDL_CreateRGBSurfaceFrom
+ so this naieve implementation is needed.
+ TODO: move to GL rendering as this is processing intensive.
+ */
+SDL_Surface * _SDL_CreateRGBSurfaceFrom(void *pixels,
+                          int width, int height, int depth, int pitch,
+                          Uint32 Rmask, Uint32 Gmask, Uint32 Bmask,
+                         Uint32 Amask)
+{
+  SDL_Surface *surface;
+  surface = SDL_CreateRGBSurface(SDL_SWSURFACE, width, height, depth,
+                                   Rmask, Gmask, Bmask, Amask);
+  if (surface != NULL) {
+
+    #if 0 // DEBUG
+    printf("%s:%d:%s width: %d height: %d depth: %d pitch %d rmask: %x gmask %x bmask %x amask: %x\n", __FILE__, __LINE__, __func__, width, height, depth, pitch, Rmask, Gmask, Bmask, Amask);
+    //main.cpp:457:_SDL_CreateRGBSurfaceFrom width: 256 height: 384 depth: 16 pitch 512 rmask: 1f gmask 3e0 bmask 7c00 amask: 0
+    //r: 0001 1111 --> 5 bits
+    //g: 0011 1110 0000 --> 5 bits
+    //b: 0111 1100 0000 0000 --> 5 bits
+    #endif
+
+    #if 0 // DEBUG
+    printf("Created surface: width: %d height: %d pitch %d bits per pixel %u bytes per pixel %u\n", surface->w, surface->h, surface->pitch, surface->format->BitsPerPixel, surface->format->BytesPerPixel);
+    //Created surface: width: 256 height: 384 pitch 1024 bits per pixel 32 bytes per pixel 4
+    printf("Created surface aMask: %x gMask: %x bMask: %x aMask %x\n", surface->format->Rmask, surface->format->Gmask, surface->format->Bmask, surface->format->Amask);
+    // Created surface aMask: 1f gMask: 3e0 bMask: 7c00 aMask ff000000
+    #endif
+
+    SDL_LockSurface( surface );
+
+    const unsigned int srcPixelPitch = pitch/(depth/8);
+    const unsigned int destBytesPerPixel = surface->format->BytesPerPixel;
+    for(int y = 0; y < height; ++y)
+    {
+      for(int x = 0; x < width; ++x)
+      {
+        Uint16* pSrc = (Uint16*)pixels + y * srcPixelPitch + x;
+        Uint8* pDest = ((Uint8*)surface->pixels) + y * surface->pitch + x * destBytesPerPixel;
+
+        Uint8 r = (pSrc[0] & Rmask);
+        double _r = r * 255.0/32.0;
+        Uint8 g = ((pSrc[0] & Gmask)>> 5);
+        double _g = g * 255.0/32.0;
+        Uint8 b = ((pSrc[0] & Bmask)>> 10);
+        double _b = b * 255.0/32.0;
+
+        pDest[0] = (Uint8)_r;
+        pDest[1] = (Uint8)_g;
+        pDest[2] = (Uint8)_b;
+        pDest[3] = 0xff; // alpha
+      }
+    }
+    //SDL_SetClipRect(surface, NULL);
+    SDL_UnlockSurface(surface);
+  }
+  return surface;
+}
+#endif // __EMSCRIPTEN__
+
+
 static void
 Draw( void) {
+  #if !SDL_VERSION_ATLEAST(2,0,0)
   const NDSDisplayInfo &displayInfo = GPU->GetDisplayInfo();
   const size_t pixCount = GPU_FRAMEBUFFER_NATIVE_WIDTH * GPU_FRAMEBUFFER_NATIVE_HEIGHT;
   ColorspaceApplyIntensityToBuffer16<false, false>((u16 *)displayInfo.masterNativeBuffer, pixCount, displayInfo.backlightIntensity[NDSDisplayID_Main]);
   ColorspaceApplyIntensityToBuffer16<false, false>((u16 *)displayInfo.masterNativeBuffer + pixCount, pixCount, displayInfo.backlightIntensity[NDSDisplayID_Touch]);
 
+  #if !defined(__EMSCRIPTEN__)
   SDL_Surface *rawImage = SDL_CreateRGBSurfaceFrom(displayInfo.masterNativeBuffer, GPU_FRAMEBUFFER_NATIVE_WIDTH, GPU_FRAMEBUFFER_NATIVE_HEIGHT * 2, 16, GPU_FRAMEBUFFER_NATIVE_WIDTH * sizeof(u16), 0x001F, 0x03E0, 0x7C00, 0);
+  #else
+  SDL_Surface *rawImage = _SDL_CreateRGBSurfaceFrom(displayInfo.masterNativeBuffer, GPU_FRAMEBUFFER_NATIVE_WIDTH, GPU_FRAMEBUFFER_NATIVE_HEIGHT * 2, 16, GPU_FRAMEBUFFER_NATIVE_WIDTH * sizeof(u16), 0x001F, 0x03E0, 0x7C00, 0);
+  #endif
   if(rawImage == NULL) return;
 
   SDL_BlitSurface(rawImage, 0, surface, 0);
   SDL_UpdateRect(surface, 0, 0, 0, 0);
   SDL_FreeSurface(rawImage);
+#else // SDL 2+
 
+  if(!surface && !screenTexture)
+  {
+    surface = SDL_CreateRGBSurface(0, GPU_FRAMEBUFFER_NATIVE_WIDTH,
+                                  GPU_FRAMEBUFFER_NATIVE_HEIGHT * 2,
+                                  16, // DEPTH
+                                  0x001F, 0x03E0, 0x7C00, 0);
+    if(!surface)
+    {
+      ::fprintf(stderr, "%s%d%s failed to init rgb surface for screen texture.\n", __FILE__, __LINE__, __func__);
+    }
+  
+    screenTexture = SDL_CreateTexture(renderer,
+                                            SDL_PIXELFORMAT_ABGR1555,
+                                            SDL_TEXTUREACCESS_STREAMING,
+                                            GPU_FRAMEBUFFER_NATIVE_WIDTH,
+                                            GPU_FRAMEBUFFER_NATIVE_HEIGHT * 2);
+    if(!screenTexture) {
+      ::fprintf(stderr, "%s%d%s failed to init texture screen texture.\n", __FILE__, __LINE__, __func__);
+    }
+  }
+
+  const NDSDisplayInfo &displayInfo = GPU->GetDisplayInfo();
+  SDL_UpdateTexture(screenTexture,
+                    NULL,
+                    displayInfo.masterNativeBuffer,
+                    surface->pitch);
+  SDL_RenderCopy(renderer, screenTexture, NULL, NULL);
+  SDL_RenderPresent(renderer);
+
+  #endif // !SDL_VERSION_ATLEAST(2,0,0)
+  
   return;
 }
 
@@ -456,9 +693,13 @@ static void desmume_cycle(struct ctrls_event_config * cfg)
       SDL_JoystickEventState(SDL_ENABLE);
 
     /* There's an event waiting to be processed? */
+    #if !defined(__EMSCRIPTEN__)
     while ( !cfg->sdl_quit &&
         (SDL_PollEvent(&event) || (!cfg->focused && SDL_WaitEvent(&event))))
-      {
+    #else
+    if( !cfg->sdl_quit && SDL_PollEvent(&event))
+    #endif
+    {
         process_ctrls_event( event, cfg);
     }
 
@@ -475,30 +716,132 @@ static void desmume_cycle(struct ctrls_event_config * cfg)
     SPU_Emulate_user();
 }
 
-int main(int argc, char ** argv) {
-  class configured_features my_config;
-  struct ctrls_event_config ctrls_cfg;
+/*
+  Emscritpen requires a non-blocking main loop, so it's traditional
+  to break out the work we do each frame, as well as any cleanup into separate methods.
+  emscripten_set_main_loop(update_loop, 60, 1);
 
-  int limiter_frame_counter = 0;
-  int limiter_tick0 = 0;
-  int error;
+*/
 
-  GKeyFile *keyfile;
+int limiter_frame_counter = 0;
+int limiter_tick0 = 0;
+int error;
 
-  int now;
+#if !defined(__EMSCRIPTEN__)
+GKeyFile *keyfile;
+#endif
+
+int now;
 
 #ifdef DISPLAY_FPS
-  u32 fps_timing = 0;
-  u32 fps_frame_counter = 0;
-  u32 fps_previous_time = 0;
+u32 fps_timing = 0;
+u32 fps_frame_counter = 0;
+u32 fps_previous_time = 0;
 #endif
 
 #ifdef INCLUDE_OPENGL_2D
-  GLuint screen_texture[2];
+GLuint screen_texture[2];
 #endif
-  /* this holds some info about our display */
-  const SDL_VideoInfo *videoInfo;
+class configured_features my_config;
+struct ctrls_event_config ctrls_cfg;
 
+#if defined(__EMSCRIPTEN__)
+void update_loop()
+{
+  #if 0
+  static unsigned int _frameNum = 0;
+  _frameNum++;
+  printf("%s:%d:%s frame: %u\n", __FILE__, __LINE__, __func__, _frameNum);
+  #endif
+
+  desmume_cycle(&ctrls_cfg);
+
+#ifdef HAVE_LIBAGG
+  osd->update();
+  DrawHUD();
+#endif
+
+#ifdef INCLUDE_OPENGL_2D
+  if ( my_config.opengl_2d) {
+    opengl_Draw(screen_texture);
+    ctrls_cfg.resize_cb = &resizeWindow;
+  }
+  else
+#endif
+    Draw();
+
+#ifdef HAVE_LIBAGG
+  osd->clear();
+#endif
+
+  #if 0
+  for ( int i = 0; i < my_config.frameskip; i++ )
+  {
+      NDS_SkipNextFrame();
+      desmume_cycle(&ctrls_cfg);
+  }
+  #endif
+
+#ifdef DISPLAY_FPS
+  now = SDL_GetTicks();
+#endif
+
+
+  #if 0
+  if ( !my_config.disable_limiter && !ctrls_cfg.boost) {
+#ifndef DISPLAY_FPS
+    now = SDL_GetTicks();
+#endif
+    int delay =  (limiter_tick0 + limiter_frame_counter*1000/FPS_LIMITER_FPS) - now;
+    if (delay < -500 || delay > 100) { // reset if we fall too far behind don't want to run super fast until we catch up
+      limiter_tick0 = now;
+      limiter_frame_counter = 0;
+    } else if (delay > 0) {
+      SDL_Delay(delay);
+    }
+  }
+  #endif
+
+  // always count frames, we'll mess up if the limiter gets turned on later otherwise
+  limiter_frame_counter += 1 + my_config.frameskip;
+
+#ifdef DISPLAY_FPS
+  fps_frame_counter += 1;
+  fps_timing += now - fps_previous_time;
+  fps_previous_time = now;
+
+  if ( fps_frame_counter == NUM_FRAMES_TO_TIME) {
+    char win_title[20];
+    float fps = NUM_FRAMES_TO_TIME * 1000.f / fps_timing;
+
+    fps_frame_counter = 0;
+    fps_timing = 0;
+
+    snprintf( win_title, sizeof(win_title), "Desmume %f", fps);
+
+    #if !SDL_VERSION_ATLEAST(2,0,0)
+    SDL_WM_SetCaption( win_title, NULL);
+    #endif
+  }
+#endif
+}
+#endif
+
+int main(int argc, char ** argv) {
+  
+  #if defined(__EMSCRIPTEN__)
+  printf("%s:%d:%s\n", __FILE__, __LINE__, __func__);
+  for(int i = 0; i < argc; ++i)
+  {
+    printf("%s:%d:%s argv[%d] = %s\n", __FILE__, __LINE__, __func__, i, argv[i]);
+  }
+  #endif
+
+  /* this holds some info about our display */
+  #if !SDL_VERSION_ATLEAST(2,0,0)
+  const SDL_VideoInfo *videoInfo;
+  #endif
+  
   /* the firmware settings */
   struct NDS_fw_config_data fw_config;
 
@@ -512,6 +855,15 @@ int main(int argc, char ** argv) {
   if ( !fill_config( &my_config, argc, argv)) {
     exit(1);
   }
+
+  #if defined(__EMSCRIPTEN__)
+
+  // Set some paths standard paths for web version
+  strncpy(path.pathToModule, "/", MAX_PATH);
+  strncpy(path.pathToSlot1D, "/Slot1D", MAX_PATH);
+  strncpy(path.pathToBattery, "/Battery", MAX_PATH);
+
+  #endif
 
   /* use any language set on the command line */
   if ( my_config.firmware_language != -1) {
@@ -573,9 +925,11 @@ int main(int argc, char ** argv) {
     slot2_Init();
     slot2_Change((NDS_SLOT2_TYPE)slot2_device_type);
 
+  #if !defined(__EMSCRIPTEN__)
   if ( !g_thread_supported()) {
     g_thread_init( NULL);
   }
+  #endif
 
   driver = new BaseDriver();
   
@@ -633,6 +987,10 @@ int main(int argc, char ** argv) {
 
   backup_setManualBackupType(my_config.savetype);
 
+  #if 1
+  printf("%s:%d:%s my_config.nds_file: %s\n", __FILE__, __LINE__, __func__, my_config.nds_file.c_str());
+  #endif
+
   error = NDS_LoadROM( my_config.nds_file.c_str() );
   if (error < 0) {
     fprintf(stderr, "error while loading %s\n", my_config.nds_file.c_str());
@@ -647,20 +1005,27 @@ int main(int argc, char ** argv) {
               SDL_GetError());
       return 1;
     }
-  SDL_WM_SetCaption("Desmume SDL", NULL);
 
+  #if !SDL_VERSION_ATLEAST(2,0,0)
+  SDL_WM_SetCaption("Desmume SDL", NULL);
+  #endif
+  
+  #if !SDL_VERSION_ATLEAST(2,0,0)
   /* Fetch the video info */
   videoInfo = SDL_GetVideoInfo( );
   if ( !videoInfo ) {
     fprintf( stderr, "Video query failed: %s\n", SDL_GetError( ) );
     exit( -1);
   }
+  #endif
 
   /* This checks if hardware blits can be done */
+  #if !SDL_VERSION_ATLEAST(2,0,0)
   if ( videoInfo->blit_hw )
     sdl_videoFlags |= SDL_HWACCEL;
+  #endif
 
-#ifdef INCLUDE_OPENGL_2D
+#if defined(INCLUDE_OPENGL_2D) && !SDL_VERSION_ATLEAST(2,0,0)
   if ( my_config.opengl_2d) {
     /* the flags to pass to SDL_SetVideoMode */
     sdl_videoFlags  = SDL_OPENGL;          /* Enable OpenGL in SDL */
@@ -698,6 +1063,8 @@ int main(int argc, char ** argv) {
 
   if ( !my_config.opengl_2d) {
 #endif
+
+    #if !SDL_VERSION_ATLEAST(2,0,0)
     sdl_videoFlags |= SDL_SWSURFACE;
     surface = SDL_SetVideoMode(256, 384, 32, sdl_videoFlags);
 
@@ -705,7 +1072,27 @@ int main(int argc, char ** argv) {
       fprintf( stderr, "Video mode set failed: %s\n", SDL_GetError( ) );
       exit( -1);
     }
-#ifdef INCLUDE_OPENGL_2D
+    #else // !SDL_VERSION_ATLEAST(2,0,0)
+    sdl_videoFlags = SDL_WINDOW_OPENGL;
+    screen = SDL_CreateWindow("My Game Window",
+                          SDL_WINDOWPOS_UNDEFINED,
+                          SDL_WINDOWPOS_UNDEFINED,
+                          GPU_FRAMEBUFFER_NATIVE_WIDTH, GPU_FRAMEBUFFER_NATIVE_HEIGHT*2,
+                          sdl_videoFlags);
+    if(!screen)
+    {
+      ::fprintf(stderr,"Failure to initialize sdl screen.\n");
+      return -1;
+    }
+    renderer = SDL_CreateRenderer(screen, -1, 0);
+    if(!renderer)
+    {
+      ::fprintf(stderr, "Failure to initialize sdl renderer.\n");
+      return -1;
+    }
+    #endif // !SDL_VERSION_ATLEAST(2,0,0)
+
+#if defined(INCLUDE_OPENGL_2D) && !SDL_VERSION_ATLEAST(2,0,0)
   }
 
   /* set the initial window size */
@@ -716,9 +1103,13 @@ int main(int argc, char ** argv) {
 
   /* Initialize joysticks */
   if(!init_joy()) return 1;
+
+  #if !defined(__EMSCRIPTEN__)
   /* Load keyboard and joystick configuration */
   keyfile = desmume_config_read_file(cli_kb_cfg);
   desmume_config_dispose(keyfile);
+  #endif
+
   /* Since gtk has a different mapping the keys stop to work with the saved configuration :| */
   load_default_config(cli_kb_cfg);
 
@@ -752,7 +1143,9 @@ int main(int argc, char ** argv) {
 #endif
   ctrls_cfg.resize_cb = &resizeWindow_stub;
 
-  while(!ctrls_cfg.sdl_quit) {
+  #if !defined(__EMSCRIPTEN__)
+  while(!ctrls_cfg.sdl_quit)
+  {
     desmume_cycle(&ctrls_cfg);
 
 #ifdef HAVE_LIBAGG
@@ -814,7 +1207,14 @@ int main(int argc, char ** argv) {
     }
 #endif
   }
+  #else // __EMSCRIPTEN__
 
+  emscripten_set_main_loop(update_loop, 0, 1);
+  
+  #endif
+
+  // TODO: move cleanup to a simple method
+  #if !defined(__EMSCRIPTEN__)
   /* Unload joystick */
   uninit_joy();
 
@@ -830,7 +1230,7 @@ int main(int argc, char ** argv) {
   
   SDL_Quit();
   NDS_DeInit();
-
+  #endif // __EMSCRIPTEN__
 
   return 0;
 }
