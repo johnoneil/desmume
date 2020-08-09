@@ -75,7 +75,7 @@ fi
 
 dnl - Check for the OpenGL includes
 AC_CHECK_HEADERS([GL/gl.h],
-     [AC_CHECK_HEADERS([GL/glu.h], [have_gl_h=yes LIBS="$LIBS -lGL"], [have_gl_h=no])],
+		 [AC_CHECK_HEADERS([GL/glu.h], [have_gl_h=yes LIBS="$LIBS -lGL"], [have_gl_h=no])],
 		 [have_gl_h=no])
 if test "have_gl_h" = "no" ; then
 	AC_MSG_WARN([Building without GL support because of missing headers.])
@@ -257,13 +257,14 @@ if test "x$HAVE_LIBGLADE" = "xyes"; then
 fi
 
 dnl - jit support
-case $host_cpu in
-  x86|x86_64|i386|i486|i586|i686)
-    HAVE_JIT=no
-    #AC_DEFINE(HAVE_JIT)
-    ;;
-esac
-AM_CONDITIONAL([HAVE_JIT], [test "x$HAVE_JIT" = "xyes"])
+AC_ARG_ENABLE([jit],
+[  --enable-jit    enable rom JIT],
+[case "${enableval}" in
+  yes) jit=true ;;
+  no)  jit=false ;;
+  *) AC_MSG_ERROR([bad value ${enableval} for --enable-jit]) ;;
+esac],[jit=false])
+AM_CONDITIONAL([HAVE_JIT], [test $jit = true])
 
 dnl - wifi support
 AC_ARG_ENABLE(wifi,
