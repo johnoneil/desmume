@@ -36,6 +36,11 @@ Makefile.in
 /desmume/src/frontend/posix/install-sh
 /desmume/src/frontend/cocoa/openemu/OpenEmuBase.framework/
 /desmume/src/frontend/cocoa/OptimizationProfiles/
+roms
+*.wasm
+desmume-cli.js
+a.out
+a.out.js
 
 # Xcode
 
