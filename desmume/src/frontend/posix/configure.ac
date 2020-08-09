@@ -26,6 +26,15 @@ AC_PROG_RANLIB
 dnl -- check for endianess
 AC_C_BIGENDIAN
 
+AC_ARG_ENABLE([emscripten],
+[  --enable-emscripten    Turn on emscripten features],
+[case "${enableval}" in
+  yes) emscripten=true ;;
+  no)  emscripten=false ;;
+  *) AC_MSG_ERROR([bad value ${enableval} for --enable-emscripten]) ;;
+esac],[emscripten=false])
+AM_CONDITIONAL([EMSCRIPTEN], [test $emscripten = true])
+
 dnl -- since svn 1.7 theres only a single .svn folder in the root dir of the checkout
 dnl -- depending on what was checked out that might be .svn or ../.svn
 REVISION=0
