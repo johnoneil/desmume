@@ -41,11 +41,17 @@
 #else
 	#include <GL/gl.h>
 	#include <GL/glext.h>
+	#if !defined(__EMSCRIPTEN__)
 	#include <GL/glx.h>
+	#endif
 	#include "utils/glcorearb.h"
 
 	#define OGLEXT(procPtr, func)		procPtr func = NULL;
+	#if !defined(__EMSCRIPTEN__)
 	#define INITOGLEXT(procPtr, func)	func = (procPtr)glXGetProcAddress((const GLubyte *) #func);
+	#else
+	#define INITOGLEXT(procPtr, func)
+	#endif
 	#define EXTERNOGLEXT(procPtr, func)	extern procPtr func;
 #endif
 

@@ -56,7 +56,9 @@
 #else
 	#include <GL/gl.h>
 	#include <GL/glext.h>
+	#if !defined(__EMSCRIPTEN__)
 	#include <GL/glx.h>
+	#endif
 
 	/* This is a workaround needed to compile against nvidia GL headers */
 	#ifndef GL_ALPHA_BLEND_EQUATION_ATI
@@ -64,7 +66,11 @@
 	#endif
 
 	#define OGLEXT(procPtr, func)		procPtr func = NULL;
+	#if !defined(__EMSCRIPTEN__)
 	#define INITOGLEXT(procPtr, func)	func = (procPtr)glXGetProcAddress((const GLubyte *) #func);
+	#else
+	#define INITOGLEXT(procPtr, func)
+	#endif
 	#define EXTERNOGLEXT(procPtr, func)	extern procPtr func;
 #endif
 
@@ -98,7 +104,7 @@
 #endif
 
 // Textures
-#if !defined(GLX_H)
+#if !defined(GLX_H) && !defined(__EMSCRIPTEN__)
 EXTERNOGLEXT(PFNGLACTIVETEXTUREPROC, glActiveTexture) // Core in v1.3
 EXTERNOGLEXT(PFNGLACTIVETEXTUREARBPROC, glActiveTextureARB)
 #endif
@@ -188,7 +194,7 @@ EXTERNOGLEXT(PFNGLCLEARBUFFERFVPROC, glClearBufferfv) // Core in v3.0
 EXTERNOGLEXT(PFNGLCLEARBUFFERFIPROC, glClearBufferfi) // Core in v3.0
 
 // Textures
-#if !defined(GLX_H)
+#if !defined(GLX_H) && !defined(__EMSCRIPTEN__)
 EXTERNOGLEXT(PFNGLACTIVETEXTUREPROC, glActiveTexture) // Core in v1.3
 #endif
 

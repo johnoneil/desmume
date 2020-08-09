@@ -67,9 +67,9 @@ fi
 
 dnl - Check for the OpenGL includes
 AC_CHECK_HEADERS([GL/gl.h],
-     [AC_CHECK_HEADERS([GL/glu.h], [have_gl_h=yes LIBS="$LIBS -lGL -lGLU"], [have_gl_h=no])],
+     #[AC_CHECK_HEADERS([GL/glu.h], [have_gl_h=yes LIBS="$LIBS -lGL -lGLU"], [have_gl_h=no])],
 		 # emscripten: remove glu
-     #[AC_CHECK_HEADERS([GL/glu.h], [have_gl_h=yes LIBS="$LIBS -lGL"], [have_gl_h=no])],
+     [AC_CHECK_HEADERS([GL/glu.h], [have_gl_h=yes LIBS="$LIBS -lGL"], [have_gl_h=no])],
 		 [have_gl_h=no])
 if test "have_gl_h" = "no" ; then
 	AC_MSG_WARN([Building without GL support because of missing headers.])

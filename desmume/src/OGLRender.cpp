@@ -110,7 +110,7 @@ void (*OGLCreateRenderer_3_2_Func)(OpenGLRenderer **rendererPtr) = NULL;
 //------------------------------------------------------------
 
 // Textures
-#if !defined(GLX_H)
+#if !defined(GLX_H) && !defined(__EMSCRIPTEN__)
 OGLEXT(PFNGLACTIVETEXTUREPROC, glActiveTexture) // Core in v1.3
 OGLEXT(PFNGLACTIVETEXTUREARBPROC, glActiveTextureARB)
 #endif
@@ -191,7 +191,7 @@ OGLEXT(PFNGLDELETERENDERBUFFERSEXTPROC, glDeleteRenderbuffersEXT)
 static void OGLLoadEntryPoints_Legacy()
 {
 	// Textures
-	#if !defined(GLX_H)
+	#if !defined(GLX_H) && !defined(__EMSCRIPTEN__)
 	INITOGLEXT(PFNGLACTIVETEXTUREPROC, glActiveTexture) // Core in v1.3
 	INITOGLEXT(PFNGLACTIVETEXTUREARBPROC, glActiveTextureARB)
 	#endif
