@@ -1,0 +1,18 @@
+#!/bin/bash
+set -e
+APP=desmume
+INSTALL_DIR=${HOME}/public_html/${APP}
+
+mkdir -p ${INSTALL_DIR}
+
+cp cli/index.html ${INSTALL_DIR}
+cp cli/loading.gif ${INSTALL_DIR}
+cp cli/desmume-cli.js ${INSTALL_DIR}
+cp cli/desmume-cli.wasm ${INSTALL_DIR}
+cp -r cli/roms ${INSTALL_DIR}
+
+#rsync -avz index.html on-three@${DEV_VPS}:/home/on-three/public_html/desmume/
+#rsync -avz loading.gif on-three@${DEV_VPS}:/home/on-three/public_html/desmume/
+#rsync -avz desmume-cli.js on-three@${DEV_VPS}:/home/on-three/public_html/desmume/
+#rsync -avz desmume-cli.wasm on-three@${DEV_VPS}:/home/on-three/public_html/desmume/
+#rsync -avz roms on-three@${DEV_VPS}:/home/on-three/public_html/desmume/
